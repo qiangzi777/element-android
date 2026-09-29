@@ -1,0 +1,66 @@
+name: Sync Data From External Sources
+on:
+  workflow_dispatch:
+  schedule:
+    # At 00:00 on every Monday UTC
+    - cron: '0 0 * * 1'
+
+permissions: {}
+
+jobs:
+  sync-emojis:
+    runs-on: ubuntu-latest
+    # Skip in forks
+    if: github.repository == 'element-hq/element-android'
+    # No concurrency required, runs every time on a schedule.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.8
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.8
+      - name: Install Prerequisite dependencies
+        run: |
+          pip install BeautifulSoup4
+          pip install requests
+      - name: Run Emoji script
+        run: ./tools/import_emojis.py
+      - name: Create Pull Request for Emojis
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        with:
+          commit-message: Sync Emojis
+          title: Sync Emojis
+          body: |
+            - Update Emojis from Unicode.org
+          branch: sync-emojis
+          base: develop
+
+  sync-sas-strings:
+    runs-on: ubuntu-latest
+    # Skip in forks
+    if: github.repository == 'element-hq/element-android'
+    # No concurrency required, runs every time on a schedule.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.8
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.8
+      - name: Install Prerequisite dependencies
+        run: |
+          pip install requests
+      - name: Run SAS String script
+        run: ./tools/import_sas_strings.py
+      - name: Create Pull Request for SAS Strings
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        with:
+          commit-message: Sync SAS Strings
+          title: Sync SAS Strings
+          body: |
+            - Update SAS Strings from matrix-doc.
+          branch: sync-sas-strings
+          base: develop
