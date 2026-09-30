@@ -31,3 +31,8 @@ Cargo.lock
 
 # For manual dependency to rust crypto sdk
 library/rustCrypto/matrix-rust-sdk-crypto.aar
+
+# Element Classic local release signing (never commit)
+vector-app/signature/element-classic-release.keystore
+vector-app/signature/release-signing.properties
+

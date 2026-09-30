@@ -232,10 +232,21 @@ android {
             storePassword System.env.ELEMENT_ANDROID_NIGHTLY_STOREPASSWORD ?: project.property("signing.element.nightly.storePassword")
         }
         release {
-            keyAlias project.property("signing.element.keyId")
-            keyPassword project.property("signing.element.keyPassword")
-            storeFile file(project.property("signing.element.storePath"))
-            storePassword project.property("signing.element.storePassword")
+            // Prefer local file vector-app/signature/release-signing.properties (gitignored)
+            def releaseSigningProps = new Properties()
+            def releaseSigningPropsFile = file("signature/release-signing.properties")
+            if (releaseSigningPropsFile.exists()) {
+                releaseSigningPropsFile.withInputStream { releaseSigningProps.load(it) }
+            }
+            def releaseProp = { String key ->
+                def fromFile = releaseSigningProps.getProperty(key)
+                if (fromFile) return fromFile
+                return project.findProperty(key)
+            }
+            keyAlias releaseProp("signing.element.keyId")
+            keyPassword releaseProp("signing.element.keyPassword")
+            storeFile file(releaseProp("signing.element.storePath"))
+            storePassword releaseProp("signing.element.storePassword")
         }
     }
 
