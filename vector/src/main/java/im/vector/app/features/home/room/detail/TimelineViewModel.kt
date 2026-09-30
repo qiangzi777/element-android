@@ -860,7 +860,7 @@ class TimelineViewModel @AssistedInject constructor(
                     R.id.menu_timeline_thread_list -> vectorPreferences.areThreadMessagesEnabled()
                     R.id.dev_tools -> vectorPreferences.developerMode()
                     R.id.clear_all_messages,
-                    R.id.clear_messages_older_7_days -> true
+                    R.id.clear_messages_older_n_days -> true
                     else -> false
                 }
             }

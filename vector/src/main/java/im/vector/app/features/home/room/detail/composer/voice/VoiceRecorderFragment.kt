@@ -23,11 +23,13 @@ import im.vector.app.core.utils.onPermissionDeniedSnackbar
 import im.vector.app.core.utils.registerForPermissionsResult
 import im.vector.app.databinding.FragmentVoiceRecorderBinding
 import im.vector.app.features.home.room.detail.TimelineViewModel
+import im.vector.app.features.home.room.detail.composer.AudioMessageHelper
 import im.vector.app.features.home.room.detail.composer.MessageComposerAction
 import im.vector.app.features.home.room.detail.composer.MessageComposerViewEvents
 import im.vector.app.features.home.room.detail.composer.MessageComposerViewModel
 import im.vector.app.features.home.room.detail.composer.MessageComposerViewState
 import im.vector.app.features.home.room.detail.composer.SendMode
+import im.vector.app.features.home.room.detail.composer.VoicePlaybackAndroidService
 import im.vector.app.features.home.room.detail.composer.boolean
 import im.vector.app.features.home.room.detail.timeline.helper.AudioMessagePlaybackTracker
 import im.vector.lib.core.utils.timer.Clock
@@ -38,6 +40,7 @@ import javax.inject.Inject
 class VoiceRecorderFragment : VectorBaseFragment<FragmentVoiceRecorderBinding>() {
 
     @Inject lateinit var audioMessagePlaybackTracker: AudioMessagePlaybackTracker
+    @Inject lateinit var audioMessageHelper: AudioMessageHelper
     @Inject lateinit var clock: Clock
 
     private val timelineViewModel: TimelineViewModel by parentFragmentViewModel()
@@ -80,11 +83,19 @@ class VoiceRecorderFragment : VectorBaseFragment<FragmentVoiceRecorderBinding>()
 
         // Removed listeners should be set again
         setupVoiceMessageView()
+        // Restore play/pause button if audio continued in the background.
+        audioMessageHelper.syncPlaybackTrackerWithPlayer()
     }
 
     override fun onPause() {
         super.onPause()
 
+        // Leaving the room used to pause all timeline playback UI state here. With background
+        // audio playback, MediaPlayer keeps playing — do not mark those items as Paused or the
+        // play/pause button will be wrong when returning to the chat.
+        if (audioMessageHelper.isPlaying() || VoicePlaybackAndroidService.isRunning) {
+            return
+        }
         audioMessagePlaybackTracker.pauseAllPlaybacks()
     }
 

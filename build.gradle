@@ -5,6 +5,10 @@ buildscript {
     apply from: 'dependencies_groups.gradle'
 
     repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/central' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
         // Do not use `google()`, it prevents Dependabot from working properly
         maven {
             url 'https://maven.google.com'
@@ -71,6 +75,9 @@ allprojects {
     apply plugin: "io.gitlab.arturbosch.detekt"
 
     repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/central' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
         // Do not use `mavenCentral()`, it prevents Dependabot from working properly
         maven {
             url 'https://repo1.maven.org/maven2'
@@ -125,6 +132,7 @@ allprojects {
         // Warnings are potential errors, so stop ignoring them
         // You can override by passing `-PallWarningsAsErrors=false` in the command line
         kotlinOptions.allWarningsAsErrors = project.getProperties().getOrDefault("allWarningsAsErrors", "true").toBoolean()
+        kotlinOptions.jvmTarget = versions.jvmTarget
     }
 
     // Fix "Java heap space" issue

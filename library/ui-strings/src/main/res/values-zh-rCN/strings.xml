@@ -2919,12 +2919,19 @@
 
     <!-- Clear room history -->
     <string name="clear_all_messages">清除全部消息</string>
-    <string name="clear_messages_older_7_days">清除7天前的消息</string>
+    <string name="clear_messages_older_n_days">清除N天前的消息</string>
     <string name="clear_all_messages_dialog_title">清除全部消息？</string>
     <string name="clear_all_messages_dialog_content">这将从此房间的本地时间线中移除全部消息事件。房间成员与设置会保留。此操作在本设备上无法撤销。</string>
-    <string name="clear_messages_older_7_days_dialog_title">清除较早的消息？</string>
-    <string name="clear_messages_older_7_days_dialog_content">这将从此房间的本地时间线中移除7天前的消息事件。此操作在本设备上无法撤销。</string>
+    <string name="clear_messages_older_n_days_dialog_title">清除较早的消息？</string>
+    <string name="clear_messages_older_n_days_dialog_content">这将从此房间的本地时间线中移除所选天数之前的消息事件。此操作在本设备上无法撤销。</string>
+    <string name="clear_messages_older_n_days_label">天数</string>
     <string name="room_history_cleared">消息已清除</string>
     <string name="notification_media_download_title">正在下载媒体</string>
-    <string name="notification_voice_playback_title">正在播放语音消息</string>
+    <string name="notification_voice_playback_title">正在播放音频</string>
+    <string name="app_update_dialog_title">发现新版本</string>
+    <string name="app_update_dialog_content">新版本 %1$s 已下载完成，是否安装？\n\n%2$s</string>
+    <string name="app_update_default_notes">缺陷修复与体验优化。</string>
+    <string name="app_update_install">安装</string>
+    <string name="app_update_permission_title">需要安装权限</string>
+    <string name="app_update_permission_content">请允许 Element Classic 安装未知来源应用，然后返回再次安装更新。</string>
 </resources>

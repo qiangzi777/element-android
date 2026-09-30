@@ -22,6 +22,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.NumberPicker
 import android.widget.TextView
 import androidx.activity.addCallback
 import androidx.annotation.StringRes
@@ -877,9 +878,8 @@ class TimelineFragment :
                 confirmClearRoomHistory(olderThanTimestampMs = null)
                 true
             }
-            R.id.clear_messages_older_7_days -> {
-                val sevenDaysMs = 7L * 24 * 60 * 60 * 1000
-                confirmClearRoomHistory(olderThanTimestampMs = System.currentTimeMillis() - sevenDaysMs)
+            R.id.clear_messages_older_n_days -> {
+                confirmClearMessagesOlderThanNDays()
                 true
             }
             R.id.dev_tools -> {
@@ -960,19 +960,30 @@ class TimelineFragment :
     }
 
     private fun confirmClearRoomHistory(olderThanTimestampMs: Long?) {
-        val titleRes: Int
-        val messageRes: Int
-        if (olderThanTimestampMs == null) {
-            titleRes = CommonStrings.clear_all_messages_dialog_title
-            messageRes = CommonStrings.clear_all_messages_dialog_content
-        } else {
-            titleRes = CommonStrings.clear_messages_older_7_days_dialog_title
-            messageRes = CommonStrings.clear_messages_older_7_days_dialog_content
+        MaterialAlertDialogBuilder(requireActivity())
+                .setTitle(CommonStrings.clear_all_messages_dialog_title)
+                .setMessage(CommonStrings.clear_all_messages_dialog_content)
+                .setPositiveButton(CommonStrings.action_delete) { _, _ ->
+                    timelineViewModel.handle(RoomDetailAction.ClearRoomHistory(olderThanTimestampMs))
+                }
+                .setNegativeButton(CommonStrings.action_cancel, null)
+                .show()
+    }
+
+    private fun confirmClearMessagesOlderThanNDays() {
+        val layout = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_clear_messages_older_n_days, null)
+        val daysPicker = layout.findViewById<NumberPicker>(R.id.clearMessagesOlderNDaysPicker).apply {
+            minValue = 1
+            maxValue = 365
+            value = 7
+            wrapSelectorWheel = false
         }
         MaterialAlertDialogBuilder(requireActivity())
-                .setTitle(titleRes)
-                .setMessage(messageRes)
+                .setTitle(CommonStrings.clear_messages_older_n_days_dialog_title)
+                .setView(layout)
                 .setPositiveButton(CommonStrings.action_delete) { _, _ ->
+                    val days = daysPicker.value.coerceIn(1, 365)
+                    val olderThanTimestampMs = System.currentTimeMillis() - days * 24L * 60L * 60L * 1000L
                     timelineViewModel.handle(RoomDetailAction.ClearRoomHistory(olderThanTimestampMs))
                 }
                 .setNegativeButton(CommonStrings.action_cancel, null)

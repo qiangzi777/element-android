@@ -1,31 +1,34 @@
-# Element Classic 自定义修改（基于 v1.6.66）
+# Element Classic 自定义修改（基于 v1.6.71）
 
-源码目录：`ElementClassicSrc`（从官方 `element-hq/element-android` tag `v1.6.66` 解压，并迁入原 v1.6.62 上的自定义改动）。
+源码目录：`ElementClassicSrc`（从官方 `element-hq/element-android` tag `v1.6.66` 解压并迁入自定义改动；当前版本 `1.6.71`）。
 
 ## 功能
 
 ### 1. 清空消息
-聊天页右上角菜单：
-- **清除全部消息**：删除本房间本地时间线中的消息（保留房间成员/状态）
-- **清除7天前的消息**：只删除 7 天前的本地消息
-
-说明：仅清除本机缓存，不会在服务器上撤回；同步后旧消息可能再次拉取回来。
+- 清除全部消息
+- 清除 N 天前的消息（对话框可调天数，默认 7）
 
 ### 2. 语音/音频状态
-- 未下载：显示下载图标与进度
-- 已听过：气泡半透明 + ✓ 标记
+- 未下载：下载图标与进度
+- 已听过：半透明 + ✓（播完/听过约 85% 即标记，UI 立即刷新）
 
-### 3. 后台下载
-文件/音频下载改为会话级协程 + 前台服务 `MediaDownloadAndroidService`，离开聊天页或锁屏后仍可继续。
+### 3. 后台下载 / 后台播放
+- `MediaDownloadAndroidService`、`VoicePlaybackAndroidService`
+- 通知进度可拖动；点击通知回到对应聊天消息
 
-### 4. 后台播放
-语音/音频播放进入后台时启动 `VoicePlaybackAndroidService`（MediaSession 通知），保留进度；回来后可从断点继续。
+### 4. 私服自动升级
+- 读取 `{homeserver}/element-classic/update.json`
+- 自动下载、SHA-256 校验、提示安装
+- Windows 发布脚本：`..\publish-element-classic.ps1`（说明见 `..\ELEMENT_CLASSIC_UPDATE.md`）
 
-## 编译建议
+## 编译
 
-1. 安装 Android Studio（建议 Hedgehog / Iguana）与 JDK 17
-2. 用 Android Studio 打开本目录
-3. 配置 `local.properties` 中的 `sdk.dir`
-4. 构建：`./gradlew :vector-app:assembleGplayDebug`（或 IDE 中 Run）
+```bat
+rem Debug
+gradlew.bat :vector-app:assembleGplayDebug
 
-首次同步依赖较慢；若 GitHub 访问困难，需配置 Gradle 镜像。
+rem Release（正式发布）
+gradlew.bat :vector-app:assembleGplayRelease
+```
+
+Release APK 建议复制到上级目录 `D:\10-信仰\12-工具软件\Element\`，再用发布脚本上传到私服。

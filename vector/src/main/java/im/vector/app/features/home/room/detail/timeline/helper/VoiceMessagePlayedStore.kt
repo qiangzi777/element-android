@@ -8,8 +8,11 @@
 package im.vector.app.features.home.room.detail.timeline.helper
 
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.edit
 import im.vector.app.core.di.DefaultPreferences
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -17,14 +20,24 @@ import javax.inject.Singleton
 class VoiceMessagePlayedStore @Inject constructor(
         @DefaultPreferences private val preferences: SharedPreferences,
 ) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val listeners = CopyOnWriteArrayList<Listener>()
 
-    fun markPlayed(eventId: String) {
+    fun markPlayed(eventId: String): Boolean {
+        if (eventId.isBlank() || hasPlayed(eventId)) {
+            return false
+        }
         preferences.edit {
             putBoolean(playedKey(eventId), true)
         }
+        mainHandler.post {
+            listeners.forEach { it.onPlayed(eventId) }
+        }
+        return true
     }
 
     fun hasPlayed(eventId: String): Boolean {
+        if (eventId.isBlank()) return false
         return preferences.getBoolean(playedKey(eventId), false)
     }
 
@@ -44,6 +57,20 @@ class VoiceMessagePlayedStore @Inject constructor(
         }
     }
 
+    fun addListener(listener: Listener) {
+        if (!listeners.contains(listener)) {
+            listeners.add(listener)
+        }
+    }
+
+    fun removeListener(listener: Listener) {
+        listeners.remove(listener)
+    }
+
+    fun interface Listener {
+        fun onPlayed(eventId: String)
+    }
+
     private fun playedKey(eventId: String) = PREFIX_PLAYED + eventId
 
     private fun positionKey(eventId: String) = PREFIX_POSITION + eventId
@@ -53,4 +80,3 @@ class VoiceMessagePlayedStore @Inject constructor(
         private const val PREFIX_POSITION = "voice_msg_position_"
     }
 }
-

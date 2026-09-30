@@ -21,8 +21,8 @@
         app:showAsAction="never" />
 
     <item
-        android:id="@+id/clear_messages_older_7_days"
-        android:title="@string/clear_messages_older_7_days"
+        android:id="@+id/clear_messages_older_n_days"
+        android:title="@string/clear_messages_older_n_days"
         app:showAsAction="never" />
 
     <item

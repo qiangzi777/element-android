@@ -27,6 +27,7 @@ import im.vector.app.core.epoxy.ClickListener
 import im.vector.app.features.home.room.detail.timeline.helper.AudioMessagePlaybackTracker
 import im.vector.app.features.home.room.detail.timeline.helper.ContentDownloadStateTrackerBinder
 import im.vector.app.features.home.room.detail.timeline.helper.ContentUploadStateTrackerBinder
+import im.vector.app.features.home.room.detail.timeline.helper.VoiceMessagePlayedStore
 import im.vector.app.features.home.room.detail.timeline.style.TimelineMessageLayout
 import im.vector.app.features.themes.ThemeUtils
 import im.vector.app.features.voice.AudioWaveformView
@@ -73,8 +74,22 @@ abstract class MessageVoiceItem : AbsMessageItem<MessageVoiceItem.Holder>() {
     @EpoxyAttribute
     lateinit var audioMessagePlaybackTracker: AudioMessagePlaybackTracker
 
+    @EpoxyAttribute(EpoxyAttribute.Option.DoNotHash)
+    lateinit var voiceMessagePlayedStore: VoiceMessagePlayedStore
+
+    private var boundEventId: String? = null
+    private var boundHolder: Holder? = null
+    private val playedListener = VoiceMessagePlayedStore.Listener { eventId ->
+        if (eventId == boundEventId) {
+            boundHolder?.let { applyPlayedAppearance(it) }
+        }
+    }
+
     override fun bind(holder: Holder) {
         super.bind(holder)
+        boundEventId = attributes.informationData.eventId
+        boundHolder = holder
+        voiceMessagePlayedStore.addListener(playedListener)
         renderSendState(holder.voiceLayout, null)
         if (!attributes.informationData.sendState.hasFailed()) {
             contentUploadStateTrackerBinder.bind(attributes.informationData.eventId, izLocalFile, holder.progressLayout)
@@ -85,6 +100,7 @@ abstract class MessageVoiceItem : AbsMessageItem<MessageVoiceItem.Holder>() {
         }
 
         bindDownloadState(holder)
+        applyPlayedAppearance(holder)
 
         holder.voicePlaybackWaveform.doOnPreDraw {
             onWaveformViewReady(holder)
@@ -174,14 +190,20 @@ abstract class MessageVoiceItem : AbsMessageItem<MessageVoiceItem.Holder>() {
     }
 
     private fun applyPlayedAppearance(holder: Holder) {
-        holder.voicePlaybackLayout.alpha = if (hasBeenPlayed) 0.6f else 1f
-        holder.voicePlayedIndicator.isVisible = hasBeenPlayed
+        val played = hasBeenPlayed || voiceMessagePlayedStore.hasPlayed(attributes.informationData.eventId)
+        holder.voicePlaybackLayout.alpha = if (played) 0.6f else 1f
+        holder.voicePlayedIndicator.isVisible = played
     }
 
     private fun formatPlaybackTime(time: Int) = DateUtils.formatElapsedTime((time / 1000).toLong())
 
     override fun unbind(holder: Holder) {
         super.unbind(holder)
+        voiceMessagePlayedStore.removeListener(playedListener)
+        if (boundHolder === holder) {
+            boundHolder = null
+            boundEventId = null
+        }
         contentUploadStateTrackerBinder.unbind(attributes.informationData.eventId)
         contentDownloadStateTrackerBinder.unbind(mxcUrl)
         audioMessagePlaybackTracker.untrack(attributes.informationData.eventId)

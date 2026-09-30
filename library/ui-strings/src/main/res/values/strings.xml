@@ -416,6 +416,7 @@
     <string name="action_revoke">Revoke</string>
     <string name="action_disconnect">Disconnect</string>
     <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
     <string name="action_dismiss">Dismiss</string>
     <!-- TODO TO BE REMOVED -->
     <string tools:ignore="UnusedResources" name="action_reset">Reset</string>
@@ -3657,12 +3658,19 @@
 
     <!-- Clear room history -->
     <string name="clear_all_messages">Clear all messages</string>
-    <string name="clear_messages_older_7_days">Clear messages older than 7 days</string>
+    <string name="clear_messages_older_n_days">Clear messages older than N days</string>
     <string name="clear_all_messages_dialog_title">Clear all messages?</string>
     <string name="clear_all_messages_dialog_content">This will remove all message events from the local timeline in this room. Room membership and settings are kept. This cannot be undone on this device.</string>
-    <string name="clear_messages_older_7_days_dialog_title">Clear older messages?</string>
-    <string name="clear_messages_older_7_days_dialog_content">This will remove message events older than 7 days from the local timeline in this room. This cannot be undone on this device.</string>
+    <string name="clear_messages_older_n_days_dialog_title">Clear older messages?</string>
+    <string name="clear_messages_older_n_days_dialog_content">This will remove message events older than the selected number of days from the local timeline in this room. This cannot be undone on this device.</string>
+    <string name="clear_messages_older_n_days_label">Days</string>
     <string name="room_history_cleared">Messages cleared</string>
     <string name="notification_media_download_title">Downloading media</string>
-    <string name="notification_voice_playback_title">Playing voice message</string>
+    <string name="notification_voice_playback_title">Playing audio</string>
+    <string name="app_update_dialog_title">Update available</string>
+    <string name="app_update_dialog_content">A new version (%1$s) is ready to install.\n\n%2$s</string>
+    <string name="app_update_default_notes">Bug fixes and improvements.</string>
+    <string name="app_update_install">Install</string>
+    <string name="app_update_permission_title">Allow installing updates</string>
+    <string name="app_update_permission_content">Please allow Element Classic to install updates from this source, then try again.</string>
 </resources>

@@ -50,6 +50,7 @@ import im.vector.app.features.home.room.list.actions.RoomListSharedAction
 import im.vector.app.features.home.room.list.actions.RoomListSharedActionViewModel
 import im.vector.app.features.home.room.list.home.layout.HomeLayoutSettingBottomDialogFragment
 import im.vector.app.features.home.room.list.home.release.ReleaseNotesActivity
+import im.vector.app.features.update.AppUpdateManager
 import im.vector.app.features.matrixto.MatrixToBottomSheet
 import im.vector.app.features.matrixto.OriginOfMatrixTo
 import im.vector.app.features.navigation.Navigator
@@ -131,6 +132,7 @@ class HomeActivity :
     @Inject lateinit var unifiedPushHelper: UnifiedPushHelper
     @Inject lateinit var nightlyProxy: NightlyProxy
     @Inject lateinit var notificationPermissionManager: NotificationPermissionManager
+    @Inject lateinit var appUpdateManager: AppUpdateManager
 
     private var isNewAppLayoutEnabled: Boolean = false // delete once old app layout is removed
 
@@ -601,6 +603,9 @@ class HomeActivity :
         if (nightlyProxy.canDisplayPopup()) {
             nightlyProxy.updateApplication()
         }
+
+        // Private-server auto update: download + install prompt when a newer APK is published
+        appUpdateManager.onHomeResumed(this)
 
         checkNewAppLayoutFlagChange()
     }

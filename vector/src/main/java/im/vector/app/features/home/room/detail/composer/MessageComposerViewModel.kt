@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.matrix.android.sdk.api.query.QueryStringValue
 import org.matrix.android.sdk.api.session.Session
 import org.matrix.android.sdk.api.session.content.ContentAttachmentData
@@ -960,12 +961,25 @@ class MessageComposerViewModel @AssistedInject constructor(
     }
 
     private fun handlePlayOrPauseVoicePlayback(action: MessageComposerAction.PlayOrPauseVoicePlayback) {
-        session.coroutineScope.launch(Dispatchers.IO) {
+        session.coroutineScope.launch {
             try {
-                // Download can fail — keep going in session scope / foreground keeper
-                val audioFile = mediaDownloadKeeper.download(action.messageAudioContent)
-                // Play can fail
-                audioMessageHelper.startOrPausePlayback(action.eventId, audioFile)
+                // Download on IO; MediaPlayer must be controlled on Main to avoid crashes.
+                val audioFile = withContext(Dispatchers.IO) {
+                    mediaDownloadKeeper.download(action.messageAudioContent)
+                }
+                withContext(Dispatchers.Main) {
+                    audioMessageHelper.startOrPausePlayback(
+                            id = action.eventId,
+                            file = audioFile,
+                            roomId = room?.roomId,
+                            title = action.messageAudioContent.body,
+                    )
+                    if (audioMessageHelper.isPlayingOrPaused()) {
+                        VoicePlaybackAndroidService.start(context)
+                    } else {
+                        VoicePlaybackAndroidService.stop(context)
+                    }
+                }
             } catch (failure: Throwable) {
                 _viewEvents.post(MessageComposerViewEvents.VoicePlaybackOrRecordingFailure(failure))
             }
