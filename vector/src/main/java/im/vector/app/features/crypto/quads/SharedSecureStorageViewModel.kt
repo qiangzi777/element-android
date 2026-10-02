@@ -22,6 +22,7 @@ import im.vector.app.core.di.hiltMavericksViewModelFactory
 import im.vector.app.core.platform.VectorViewModel
 import im.vector.app.core.platform.WaitingViewData
 import im.vector.app.core.resources.StringProvider
+import im.vector.app.features.crypto.recover.LocalRecoveryKeyStore
 import im.vector.lib.strings.CommonStrings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -81,6 +82,7 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
         private val stringProvider: StringProvider,
         private val session: Session,
         private val matrix: Matrix,
+        private val localRecoveryKeyStore: LocalRecoveryKeyStore,
 ) :
         VectorViewModel<SharedSecureStorageViewState, SharedSecureStorageAction, SharedSecureStorageViewEvent>(initialState) {
 
@@ -88,6 +90,8 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
     interface Factory : MavericksAssistedViewModelFactory<SharedSecureStorageViewModel, SharedSecureStorageViewState> {
         override fun create(initialState: SharedSecureStorageViewState): SharedSecureStorageViewModel
     }
+
+    private var autoTriedLocalRecoveryKey = false
 
     init {
         setState {
@@ -136,6 +140,10 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
             setState { copy(ready = true) }
         }
 
+        viewModelScope.launch(Dispatchers.IO) {
+            tryUnlockWithLocalRecoveryKey()
+        }
+
         session.flow()
                 .liveUserCryptoDevices(session.myUserId)
                 .distinctUntilChanged()
@@ -156,6 +164,15 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
             SharedSecureStorageAction.ForgotResetAll -> handleResetAll()
             SharedSecureStorageAction.DoResetAll -> handleDoResetAll()
         }
+    }
+
+    private fun tryUnlockWithLocalRecoveryKey() {
+        if (autoTriedLocalRecoveryKey) return
+        if (initialState.step == SharedSecureStorageViewState.Step.ResetAll) return
+        val localKey = localRecoveryKeyStore.readRecoveryKey() ?: return
+        autoTriedLocalRecoveryKey = true
+        Timber.i("Found local recovery key file, trying automatic unlock")
+        handleSubmitKey(SharedSecureStorageAction.SubmitKey(localKey), fromLocalFile = true)
     }
 
     private fun handleDoResetAll() {
@@ -216,7 +233,7 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
         }
     }
 
-    private fun handleSubmitKey(action: SharedSecureStorageAction.SubmitKey) {
+    private fun handleSubmitKey(action: SharedSecureStorageAction.SubmitKey, fromLocalFile: Boolean = false) {
         _viewEvents.post(SharedSecureStorageViewEvent.ShowModalLoading)
         val decryptedSecretMap = HashMap<String, String>()
         setState { copy(checkingSSSSAction = Loading()) }
@@ -226,7 +243,11 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
                 val keyInfoResult = session.sharedSecretStorageService().getDefaultKey()
                 if (!keyInfoResult.isSuccess()) {
                     _viewEvents.post(SharedSecureStorageViewEvent.HideModalLoading)
-                    _viewEvents.post(SharedSecureStorageViewEvent.Error(stringProvider.getString(CommonStrings.failed_to_access_secure_storage)))
+                    if (fromLocalFile) {
+                        offerResetAfterLocalFileFailure()
+                    } else {
+                        _viewEvents.post(SharedSecureStorageViewEvent.Error(stringProvider.getString(CommonStrings.failed_to_access_secure_storage)))
+                    }
                     return@launch
                 }
                 val keyInfo = (keyInfoResult as KeyInfoResult.Success).keyInfo
@@ -240,10 +261,14 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
                         )
                 )
                 val keySpec = RawBytesKeySpec.fromRecoveryKey(recoveryKey) ?: return@launch Unit.also {
-                    _viewEvents.post(SharedSecureStorageViewEvent.KeyInlineError(stringProvider.getString(CommonStrings.bootstrap_invalid_recovery_key)))
                     _viewEvents.post(SharedSecureStorageViewEvent.HideModalLoading)
-                    setState {
-                        copy(checkingSSSSAction = Fail(IllegalArgumentException(stringProvider.getString(CommonStrings.bootstrap_invalid_recovery_key))))
+                    if (fromLocalFile) {
+                        offerResetAfterLocalFileFailure()
+                    } else {
+                        _viewEvents.post(SharedSecureStorageViewEvent.KeyInlineError(stringProvider.getString(CommonStrings.bootstrap_invalid_recovery_key)))
+                        setState {
+                            copy(checkingSSSSAction = Fail(IllegalArgumentException(stringProvider.getString(CommonStrings.bootstrap_invalid_recovery_key))))
+                        }
                     }
                 }
                 withContext(Dispatchers.IO) {
@@ -261,9 +286,24 @@ class SharedSecureStorageViewModel @AssistedInject constructor(
             }, {
                 setState { copy(checkingSSSSAction = Fail(it)) }
                 _viewEvents.post(SharedSecureStorageViewEvent.HideModalLoading)
-                _viewEvents.post(SharedSecureStorageViewEvent.KeyInlineError(stringProvider.getString(CommonStrings.keys_backup_passphrase_error_decrypt)))
+                if (fromLocalFile) {
+                    offerResetAfterLocalFileFailure()
+                } else {
+                    _viewEvents.post(SharedSecureStorageViewEvent.KeyInlineError(stringProvider.getString(CommonStrings.keys_backup_passphrase_error_decrypt)))
+                }
             })
         }
+    }
+
+    private fun offerResetAfterLocalFileFailure() {
+        Timber.w("Local recovery key file could not decrypt, offering full reset")
+        _viewEvents.post(
+                SharedSecureStorageViewEvent.Error(
+                        stringProvider.getString(CommonStrings.recovery_key_local_file_failed_reset),
+                        dismiss = false
+                )
+        )
+        handleResetAll()
     }
 
     private suspend fun performRequest(keyInfo: KeyInfo, keySpec: RawBytesKeySpec, decryptedSecretMap: HashMap<String, String>) {

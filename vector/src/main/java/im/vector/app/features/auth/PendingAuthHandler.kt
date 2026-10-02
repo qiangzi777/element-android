@@ -8,6 +8,7 @@
 package im.vector.app.features.auth
 
 import im.vector.app.core.di.ActiveSessionHolder
+import im.vector.app.features.login.ReAuthHelper
 import org.matrix.android.sdk.api.Matrix
 import org.matrix.android.sdk.api.auth.UIABaseAuth
 import org.matrix.android.sdk.api.auth.UserPasswordAuth
@@ -22,6 +23,7 @@ import kotlin.coroutines.resumeWithException
 class PendingAuthHandler @Inject constructor(
         private val matrix: Matrix,
         private val activeSessionHolder: ActiveSessionHolder,
+        private val reAuthHelper: ReAuthHelper,
 ) {
     var uiaContinuation: Continuation<UIABaseAuth>? = null
     var pendingAuth: UIABaseAuth? = null
@@ -43,6 +45,9 @@ class PendingAuthHandler @Inject constructor(
                         inputStream = password.fromBase64().inputStream(),
                         keyAlias = ReAuthActivity.DEFAULT_RESULT_KEYSTORE_ALIAS
                 )
+        if (!decryptedPass.isNullOrEmpty()) {
+            reAuthHelper.data = decryptedPass
+        }
         uiaContinuation?.resume(
                 UserPasswordAuth(
                         session = pendingAuth?.session,

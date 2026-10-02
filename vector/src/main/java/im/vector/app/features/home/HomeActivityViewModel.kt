@@ -29,6 +29,7 @@ import im.vector.app.features.analytics.extensions.toAnalyticsType
 import im.vector.app.features.analytics.plan.Signup
 import im.vector.app.features.analytics.store.AnalyticsStore
 import im.vector.app.features.home.room.list.home.release.ReleaseNotesPreferencesStore
+import im.vector.app.features.crypto.recover.LocalRecoveryKeyStore
 import im.vector.app.features.login.ReAuthHelper
 import im.vector.app.features.onboarding.AuthenticationDescription
 import im.vector.app.features.raw.wellknown.ElementWellKnown
@@ -87,6 +88,7 @@ class HomeActivityViewModel @AssistedInject constructor(
         private val ensureFcmTokenIsRetrievedUseCase: EnsureFcmTokenIsRetrievedUseCase,
         private val ensureSessionSyncingUseCase: EnsureSessionSyncingUseCase,
         private val coroutineDispatchers: CoroutineDispatchers,
+        private val localRecoveryKeyStore: LocalRecoveryKeyStore,
 ) : VectorViewModel<HomeActivityViewState, HomeActivityViewActions, HomeActivityViewEvents>(initialState) {
 
     @AssistedFactory
@@ -429,7 +431,9 @@ class HomeActivityViewModel @AssistedInject constructor(
                 } else {
                     // Cross-signing is already set up for this user, is it trusted?
                     if (!mxCrossSigningInfo.isTrusted()) {
-                        if (isSecureBackupRequired) {
+                        if (localRecoveryKeyStore.hasRecoveryKey() && session.sharedSecretStorageService().isRecoverySetup()) {
+                            _viewEvents.post(HomeActivityViewEvents.ForceVerification(true))
+                        } else if (isSecureBackupRequired) {
                             // If 4S is forced, force verification
                             _viewEvents.post(HomeActivityViewEvents.ForceVerification(true))
                         } else {

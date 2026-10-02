@@ -13,7 +13,7 @@ import javax.inject.Singleton
 import kotlin.time.Duration.Companion.minutes
 
 /**
- * Will store the account password for 3 minutes.
+ * Will store the account password for 10 minutes.
  */
 @Singleton
-class ReAuthHelper @Inject constructor() : TemporaryStore<String>(3.minutes)
+class ReAuthHelper @Inject constructor() : TemporaryStore<String>(10.minutes)

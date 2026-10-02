@@ -101,7 +101,21 @@ allprojects {
                 groups.jitpack.group.each { includeGroup it }
             }
         }
-        // Jitsi repo
+        // Jitsi repo (GitHub raw is often blocked in CN; keep mirrors first)
+        maven {
+            url "https://ghproxy.net/https://github.com/element-hq/jitsi_libre_maven/raw/main/mobile-sdk-11.5.1"
+            content {
+                groups.jitsi.regex.each { includeGroupByRegex it }
+                groups.jitsi.group.each { includeGroup it }
+            }
+        }
+        maven {
+            url "https://cdn.jsdelivr.net/gh/element-hq/jitsi_libre_maven@main/mobile-sdk-11.5.1"
+            content {
+                groups.jitsi.regex.each { includeGroupByRegex it }
+                groups.jitsi.group.each { includeGroup it }
+            }
+        }
         maven {
             url "https://github.com/element-hq/jitsi_libre_maven/raw/main/mobile-sdk-11.5.1"
             // Note: to test Jitsi release you can use a local file like this:

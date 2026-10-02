@@ -32,6 +32,7 @@ import im.vector.app.core.extensions.toMvRxBundle
 import im.vector.app.core.platform.VectorBaseBottomSheetDialogFragment
 import im.vector.app.databinding.BottomSheetBootstrapBinding
 import im.vector.app.features.auth.ReAuthActivity
+import im.vector.app.core.utils.toast
 import im.vector.lib.strings.CommonStrings
 import kotlinx.parcelize.Parcelize
 import org.matrix.android.sdk.api.auth.data.LoginFlowTypes
@@ -89,6 +90,9 @@ class BootstrapBottomSheet : VectorBaseBottomSheetDialogFragment<BottomSheetBoot
                 }
                 BootstrapViewEvents.RecoveryKeySaved -> {
                     KeepItSafeDialog().show(requireActivity())
+                }
+                BootstrapViewEvents.RecoveryKeySavedToDownloads -> {
+                    requireActivity().toast(CommonStrings.recovery_key_saved_to_downloads)
                 }
                 is BootstrapViewEvents.SkipBootstrap -> {
                     promptSkip()

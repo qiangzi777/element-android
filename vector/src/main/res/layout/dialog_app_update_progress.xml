@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="?dialogPreferredPadding"
+    android:paddingTop="8dp"
+    android:paddingEnd="?dialogPreferredPadding"
+    android:paddingBottom="8dp">
+
+    <TextView
+        android:id="@+id/appUpdateProgressText"
+        style="@style/Widget.Vector.TextView.Body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="?vctr_content_primary"
+        android:text="@string/app_update_downloading" />
+
+    <ProgressBar
+        android:id="@+id/appUpdateProgressBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:indeterminate="true"
+        android:max="1000" />
+</LinearLayout>

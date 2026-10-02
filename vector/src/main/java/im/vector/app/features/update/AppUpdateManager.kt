@@ -7,35 +7,45 @@
 
 package im.vector.app.features.update
 
+import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
+import android.view.LayoutInflater
+import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.core.content.FileProvider
 import androidx.core.content.edit
 import androidx.fragment.app.FragmentActivity
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
+import im.vector.app.R
 import im.vector.app.core.di.ActiveSessionHolder
 import im.vector.app.core.di.DefaultPreferences
+import im.vector.app.core.utils.toast
 import im.vector.lib.core.utils.timer.Clock
 import im.vector.lib.strings.CommonStrings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
+import java.lang.ref.WeakReference
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -53,6 +63,10 @@ class AppUpdateManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val checking = AtomicBoolean(false)
     private var lastPromptedVersionCode: Long = -1L
+    private var downloadingDialog: Dialog? = null
+    private var progressBar: ProgressBar? = null
+    private var progressText: TextView? = null
+    private var lastProgressUiMs: Long = 0L
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -63,70 +77,93 @@ class AppUpdateManager @Inject constructor(
 
     fun onHomeResumed(activity: FragmentActivity) {
         if (!checking.compareAndSet(false, true)) return
+        val activityRef = WeakReference(activity)
         scope.launch {
             try {
-                val prepared = withContext(Dispatchers.IO) {
-                    checkAndDownloadIfNeeded()
-                } ?: return@launch
-                if (lastPromptedVersionCode == prepared.manifest.versionCode) return@launch
-                lastPromptedVersionCode = prepared.manifest.versionCode
-                showInstallDialog(activity, prepared)
+                val localVersion = withContext(Dispatchers.IO) { currentVersionCode() }
+                val cached = withContext(Dispatchers.IO) { readCachedPrepared(localVersion) }
+                val host = activityRef.get() ?: return@launch
+                if (host.isFinishing || host.isDestroyed) return@launch
+
+                if (cached != null) {
+                    if (lastPromptedVersionCode != cached.manifest.versionCode) {
+                        lastPromptedVersionCode = cached.manifest.versionCode
+                        showInstallDialog(host, cached)
+                    }
+                    return@launch
+                }
+
+                val manifest = withContext(Dispatchers.IO) { fetchNewerManifest(localVersion) } ?: return@launch
+                if (lastPromptedVersionCode == manifest.versionCode) return@launch
+                if (!askToDownload(host, manifest)) {
+                    lastPromptedVersionCode = manifest.versionCode
+                    preferences.edit { putLong(PREF_LAST_CHECK_MS, clock.epochMillis() - CHECK_INTERVAL_MS + REMIND_DELAY_MS) }
+                    return@launch
+                }
+
+                showProgressDialog(host)
+                val apkFile = withContext(Dispatchers.IO) {
+                    downloadAndVerify(manifest) { read, total ->
+                        activityRef.get()?.runOnUiThread { updateProgress(read, total) }
+                    }
+                }
+                dismissProgressDialog()
+                val afterHost = activityRef.get()
+                if (afterHost == null || afterHost.isFinishing || afterHost.isDestroyed) return@launch
+                if (apkFile == null) {
+                    afterHost.toast(CommonStrings.app_update_download_failed)
+                    return@launch
+                }
+                preferences.edit {
+                    putLong(PREF_DOWNLOADED_VERSION_CODE, manifest.versionCode)
+                    putString(PREF_DOWNLOADED_APK_PATH, apkFile.absolutePath)
+                }
+                lastPromptedVersionCode = manifest.versionCode
+                showInstallDialog(afterHost, PreparedAppUpdate(manifest, apkFile))
             } catch (failure: Throwable) {
                 Timber.w(failure, "App update check failed")
             } finally {
+                dismissProgressDialog()
                 checking.set(false)
             }
         }
     }
 
-    private fun checkAndDownloadIfNeeded(): PreparedAppUpdate? {
+    private fun fetchNewerManifest(localVersion: Long): AppUpdateManifest? {
         val session = activeSessionHolder.getSafeActiveSession() ?: return null
         val now = clock.epochMillis()
         val lastCheck = preferences.getLong(PREF_LAST_CHECK_MS, 0L)
-        val localVersion = currentVersionCode()
-        val cached = readCachedPrepared(localVersion)
-        if (cached != null) {
-            return cached
-        }
-
-        // Always allow an immediate first check; afterwards throttle network checks.
-        val shouldHitNetwork = lastCheck == 0L || (now - lastCheck) >= CHECK_INTERVAL_MS
+        val lastManifest = preferences.getString(PREF_LAST_MANIFEST_JSON, null)
+                ?.let { runCatching { parseManifest(JSONObject(it.trim().removePrefix("\uFEFF"))) }.getOrNull() }
+        val knownNewer = lastManifest != null && isRemoteNewer(lastManifest, localVersion)
+        val shouldHitNetwork = lastCheck == 0L || (now - lastCheck) >= CHECK_INTERVAL_MS || knownNewer
         if (!shouldHitNetwork) {
-            return null
+            return if (knownNewer) lastManifest else null
         }
 
         val manifestUrl = buildManifestUrl(session.sessionParams.homeServerConnectionConfig.homeServerUriBase)
                 ?: return null
-        Timber.i("Checking app update: $manifestUrl")
+        Timber.i("Checking app update: $manifestUrl (localVersion=$localVersion ${currentVersionName()})")
         val manifest = fetchManifest(manifestUrl) ?: return null
         preferences.edit {
             putLong(PREF_LAST_CHECK_MS, now)
             putString(PREF_LAST_MANIFEST_JSON, manifest.toCacheJson())
         }
-
-        if (manifest.versionCode <= localVersion) {
-            Timber.i("App is up to date (local=$localVersion, remote=${manifest.versionCode})")
+        if (!isRemoteNewer(manifest, localVersion)) {
+            Timber.i("App is up to date (local=$localVersion ${currentVersionName()}, remote=${manifest.versionCode} ${manifest.versionName})")
             clearCachedApk()
             return null
         }
-
-        val apkFile = downloadAndVerify(manifest) ?: return null
-        preferences.edit {
-            putLong(PREF_DOWNLOADED_VERSION_CODE, manifest.versionCode)
-            putString(PREF_DOWNLOADED_APK_PATH, apkFile.absolutePath)
-        }
-        return PreparedAppUpdate(manifest, apkFile)
+        return manifest
     }
 
     private fun readCachedPrepared(localVersion: Long): PreparedAppUpdate? {
-        val downloadedCode = preferences.getLong(PREF_DOWNLOADED_VERSION_CODE, -1L)
-        if (downloadedCode <= localVersion) return null
         val path = preferences.getString(PREF_DOWNLOADED_APK_PATH, null) ?: return null
         val file = File(path)
         if (!file.exists() || file.length() == 0L) return null
         val json = preferences.getString(PREF_LAST_MANIFEST_JSON, null) ?: return null
-        val manifest = parseManifest(JSONObject(json)) ?: return null
-        if (manifest.versionCode != downloadedCode) return null
+        val manifest = parseManifest(JSONObject(json.trim().removePrefix("\uFEFF"))) ?: return null
+        if (!isRemoteNewer(manifest, localVersion)) return null
         if (manifest.apkSha256.isNotBlank() && !verifySha256(file, manifest.apkSha256)) {
             file.delete()
             return null
@@ -141,16 +178,21 @@ class AppUpdateManager @Inject constructor(
                 Timber.w("Update manifest HTTP ${response.code}")
                 return null
             }
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.string().orEmpty().trim().removePrefix("\uFEFF")
             if (body.isBlank()) return null
             return parseManifest(JSONObject(body))
         }
     }
 
-    private fun downloadAndVerify(manifest: AppUpdateManifest): File? {
+    private fun downloadAndVerify(
+            manifest: AppUpdateManifest,
+            onProgress: (read: Long, total: Long) -> Unit,
+    ): File? {
         val target = File(context.cacheDir, APK_FILE_NAME)
         if (target.exists()) {
             if (manifest.apkSha256.isNotBlank() && verifySha256(target, manifest.apkSha256)) {
+                val size = target.length()
+                onProgress(size, size)
                 return target
             }
             target.delete()
@@ -163,9 +205,25 @@ class AppUpdateManager @Inject constructor(
                 return null
             }
             val body = response.body ?: return null
-            target.outputStream().use { output ->
-                body.byteStream().use { input -> input.copyTo(output) }
+            val total = when {
+                body.contentLength() > 0 -> body.contentLength()
+                manifest.apkSize != null && manifest.apkSize > 0 -> manifest.apkSize
+                else -> -1L
             }
+            var read = 0L
+            target.outputStream().use { output ->
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n <= 0) break
+                        output.write(buffer, 0, n)
+                        read += n
+                        onProgress(read, total)
+                    }
+                }
+            }
+            onProgress(read, if (total > 0) total else read)
         }
 
         if (manifest.apkSize != null && manifest.apkSize > 0 && target.length() != manifest.apkSize) {
@@ -179,6 +237,78 @@ class AppUpdateManager @Inject constructor(
             return null
         }
         return target
+    }
+
+    private suspend fun askToDownload(activity: FragmentActivity, manifest: AppUpdateManifest): Boolean {
+        val notes = manifest.releaseNotes?.takeIf { it.isNotBlank() }
+                ?: activity.getString(CommonStrings.app_update_default_notes)
+        val message = activity.getString(CommonStrings.app_update_available_content, manifest.versionName, notes)
+        return suspendCancellableCoroutine { cont ->
+            val builder = MaterialAlertDialogBuilder(activity)
+                    .setTitle(CommonStrings.app_update_dialog_title)
+                    .setMessage(message)
+                    .setPositiveButton(CommonStrings.app_update_download) { _, _ ->
+                        if (cont.isActive) cont.resume(true)
+                    }
+            if (manifest.forceUpdate) {
+                builder.setCancelable(false)
+            } else {
+                builder.setNegativeButton(CommonStrings.action_cancel) { _, _ ->
+                    if (cont.isActive) cont.resume(false)
+                }
+                builder.setOnCancelListener {
+                    if (cont.isActive) cont.resume(false)
+                }
+                builder.setCancelable(true)
+            }
+            val dialog = builder.show()
+            cont.invokeOnCancellation { dialog.dismiss() }
+        }
+    }
+
+    private fun showProgressDialog(activity: FragmentActivity) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        dismissProgressDialog()
+        val view = LayoutInflater.from(activity).inflate(R.layout.dialog_app_update_progress, null, false)
+        progressBar = view.findViewById(R.id.appUpdateProgressBar)
+        progressText = view.findViewById(R.id.appUpdateProgressText)
+        progressBar?.isIndeterminate = true
+        lastProgressUiMs = 0L
+        downloadingDialog = MaterialAlertDialogBuilder(activity)
+                .setTitle(CommonStrings.app_update_dialog_title)
+                .setView(view)
+                .setCancelable(false)
+                .show()
+    }
+
+    private fun updateProgress(read: Long, total: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastProgressUiMs < 200L && read != total) return
+        lastProgressUiMs = now
+        val bar = progressBar ?: return
+        val text = progressText ?: return
+        if (total > 0) {
+            bar.isIndeterminate = false
+            bar.max = 1000
+            bar.progress = ((read * 1000L) / total).toInt().coerceIn(0, 1000)
+            val percent = ((read * 100L) / total).toInt().coerceIn(0, 100)
+            text.text = text.context.getString(
+                    CommonStrings.app_update_progress,
+                    formatMegabytes(read),
+                    formatMegabytes(total),
+                    percent,
+            )
+        } else {
+            bar.isIndeterminate = true
+            text.text = text.context.getString(CommonStrings.app_update_downloading) + "  " + formatMegabytes(read)
+        }
+    }
+
+    private fun dismissProgressDialog() {
+        downloadingDialog?.dismiss()
+        downloadingDialog = null
+        progressBar = null
+        progressText = null
     }
 
     private fun showInstallDialog(activity: FragmentActivity, prepared: PreparedAppUpdate) {
@@ -240,6 +370,31 @@ class AppUpdateManager @Inject constructor(
         activity.startActivity(intent)
     }
 
+    private fun currentVersionName(): String {
+        return try {
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            info.versionName.orEmpty()
+        } catch (failure: Throwable) {
+            ""
+        }
+    }
+
+    /**
+     * Release APKs append an ABI digit (versionCode * 10 + abi).
+     * update.json may publish either the split code or the unsplit gradle versionCode.
+     */
+    private fun isRemoteNewer(manifest: AppUpdateManifest, localVersion: Long): Boolean {
+        val nameCmp = compareVersionNames(manifest.versionName, currentVersionName())
+        if (nameCmp > 0) return true
+        if (nameCmp < 0) return false
+        return normalizeVersionCode(manifest.versionCode) > normalizeVersionCode(localVersion)
+    }
+
     private fun currentVersionCode(): Long {
         return try {
             val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -279,12 +434,38 @@ class AppUpdateManager @Inject constructor(
     companion object {
         private const val UPDATE_PATH = "/element-classic/update.json"
         private const val APK_FILE_NAME = "element-classic-update.apk"
-        private const val CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L
+        private const val CHECK_INTERVAL_MS = 15L * 60L * 1000L
         private const val REMIND_DELAY_MS = 24L * 60L * 60L * 1000L
         private const val PREF_LAST_CHECK_MS = "app_update_last_check_ms"
         private const val PREF_LAST_MANIFEST_JSON = "app_update_last_manifest_json"
         private const val PREF_DOWNLOADED_VERSION_CODE = "app_update_downloaded_version_code"
         private const val PREF_DOWNLOADED_APK_PATH = "app_update_downloaded_apk_path"
+
+        private fun compareVersionNames(remote: String, local: String): Int {
+            fun parts(value: String): List<Int> {
+                return value.substringBefore("-")
+                        .split('.')
+                        .mapNotNull { it.toIntOrNull() }
+            }
+            val r = parts(remote)
+            val l = parts(local)
+            val n = maxOf(r.size, l.size)
+            for (i in 0 until n) {
+                val rv = r.getOrElse(i) { 0 }
+                val lv = l.getOrElse(i) { 0 }
+                if (rv != lv) return rv.compareTo(lv)
+            }
+            return 0
+        }
+
+        private fun normalizeVersionCode(code: Long): Long {
+            // Split APKs use ~8-digit codes (base * 10 + abi). Unsplit gradle codes are ~7 digits.
+            return if (code >= 10_000_000L) code / 10L else code
+        }
+
+        private fun formatMegabytes(bytes: Long): String {
+            return String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+        }
 
         fun parseManifest(json: JSONObject): AppUpdateManifest? {
             return try {

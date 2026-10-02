@@ -23,6 +23,7 @@ import im.vector.app.core.platform.VectorViewModel
 import im.vector.app.core.platform.WaitingViewData
 import im.vector.app.core.resources.StringProvider
 import im.vector.app.features.auth.PendingAuthHandler
+import im.vector.app.features.login.ReAuthHelper
 import im.vector.app.features.raw.wellknown.SecureBackupMethod
 import im.vector.app.features.raw.wellknown.getElementWellknown
 import im.vector.app.features.raw.wellknown.isSecureBackupRequired
@@ -48,6 +49,7 @@ import org.matrix.android.sdk.api.session.uia.DefaultBaseAuth
 import timber.log.Timber
 import java.io.OutputStream
 import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class BootstrapSharedViewModel @AssistedInject constructor(
@@ -59,11 +61,15 @@ class BootstrapSharedViewModel @AssistedInject constructor(
         private val bootstrapTask: BootstrapCrossSigningTask,
         private val migrationTask: BackupToQuadSMigrationTask,
         private val pendingAuthHandler: PendingAuthHandler,
+        private val reAuthHelper: ReAuthHelper,
+        private val localRecoveryKeyStore: LocalRecoveryKeyStore,
 ) : VectorViewModel<BootstrapViewState, BootstrapActions, BootstrapViewEvents>(initialState) {
 
     private var doesKeyBackupExist: Boolean = false
     private var isBackupCreatedFromPassphrase: Boolean = false
     private val zxcvbn = Zxcvbn()
+    @Volatile
+    private var initializeInProgress = false
 
     @AssistedFactory
     interface Factory : MavericksAssistedViewModelFactory<BootstrapSharedViewModel, BootstrapViewState> {
@@ -104,9 +110,8 @@ class BootstrapSharedViewModel @AssistedInject constructor(
                 }
             }
             SetupMode.CROSS_SIGNING_ONLY -> {
-                // Go straight to account password
-                setState {
-                    copy(step = BootstrapStep.AccountReAuth())
+                viewModelScope.launch {
+                    startInitializeFlow(initialState)
                 }
             }
             SetupMode.NORMAL -> {
@@ -234,6 +239,9 @@ class BootstrapSharedViewModel @AssistedInject constructor(
                     copy(recoverySaveFileProcess = Loading())
                 }
             }
+            BootstrapActions.SaveToDownloads -> {
+                saveRecoveryKeyToDownloads()
+            }
             is BootstrapActions.SaveKeyToUri -> {
                 saveRecoveryKeyToUri(action.os)
             }
@@ -292,6 +300,31 @@ class BootstrapSharedViewModel @AssistedInject constructor(
     // =======================================
     // Business Logic
     // =======================================
+    private fun saveRecoveryKeyToDownloads() = withState { state ->
+        val formattedKey = state.recoveryKeyCreationInfo?.recoveryKey?.formatRecoveryKey().orEmpty()
+        if (formattedKey.isBlank()) return@withState
+        setState { copy(recoverySaveFileProcess = Loading()) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val saved = localRecoveryKeyStore.writeRecoveryKey(formattedKey)
+            if (saved) {
+                setState {
+                    copy(
+                            recoverySaveFileProcess = Success(Unit),
+                            step = BootstrapStep.SaveRecoveryKey(isSaved = true)
+                    )
+                }
+                _viewEvents.post(BootstrapViewEvents.RecoveryKeySavedToDownloads)
+            } else {
+                setState {
+                    copy(recoverySaveFileProcess = Fail(IllegalStateException("save failed")))
+                }
+                _viewEvents.post(
+                        BootstrapViewEvents.ModalError(stringProvider.getString(CommonStrings.recovery_key_save_to_downloads_failed))
+                )
+            }
+        }
+    }
+
     private fun saveRecoveryKeyToUri(os: OutputStream) = withState { state ->
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
@@ -365,6 +398,11 @@ class BootstrapSharedViewModel @AssistedInject constructor(
     }
 
     private fun startInitializeFlow(state: BootstrapViewState) {
+        if (initializeInProgress) {
+            Timber.w("Ignore duplicate bootstrap initialize while one is already running")
+            return
+        }
+        initializeInProgress = true
         val previousStep = state.step
 
         setState {
@@ -385,6 +423,21 @@ class BootstrapSharedViewModel @AssistedInject constructor(
             override fun performStage(flowResponse: RegistrationFlowResponse, errCode: String?, promise: Continuation<UIABaseAuth>) {
                 when (flowResponse.nextUncompletedStage()) {
                     LoginFlowTypes.PASSWORD -> {
+                        val cachedPassword = reAuthHelper.data
+                        if (!cachedPassword.isNullOrEmpty() && errCode == null) {
+                            Timber.i("Reusing cached account password for bootstrap UIA")
+                            promise.resume(
+                                    UserPasswordAuth(
+                                            session = flowResponse.session,
+                                            user = session.myUserId,
+                                            password = cachedPassword
+                                    )
+                            )
+                            return
+                        }
+                        if (errCode != null) {
+                            reAuthHelper.data = null
+                        }
                         pendingAuthHandler.pendingAuth = UserPasswordAuth(
                                 // Note that _pendingSession may or may not be null, this is OK, it will be managed by the task
                                 session = flowResponse.session,
@@ -430,9 +483,11 @@ class BootstrapSharedViewModel @AssistedInject constructor(
             ) { bootstrapResult ->
                 when (bootstrapResult) {
                     is BootstrapResult.SuccessCrossSigningOnly -> {
+                        initializeInProgress = false
                         _viewEvents.post(BootstrapViewEvents.Dismiss(true))
                     }
                     is BootstrapResult.Success -> {
+                        initializeInProgress = false
                         val isSecureBackupRequired = state.isSecureBackupRequired
                         val secureBackupMethod = state.secureBackupMethod
 
@@ -440,18 +495,25 @@ class BootstrapSharedViewModel @AssistedInject constructor(
                             // Go straight to conclusion, skip the save key step
                             _viewEvents.post(BootstrapViewEvents.Dismiss(success = true))
                         } else {
+                            val formattedKey = bootstrapResult.keyInfo.recoveryKey.formatRecoveryKey()
+                            val autoSaved = localRecoveryKeyStore.writeRecoveryKey(formattedKey)
                             setState {
                                 copy(
                                         recoveryKeyCreationInfo = bootstrapResult.keyInfo,
                                         step = BootstrapStep.SaveRecoveryKey(
-                                                // If a passphrase was used, saving key is optional
-                                                state.passphrase != null
+                                                // If a passphrase was used, saving key is optional.
+                                                // Auto-save to Downloads/open_the_heart also counts as saved.
+                                                state.passphrase != null || autoSaved
                                         )
                                 )
+                            }
+                            if (autoSaved) {
+                                _viewEvents.post(BootstrapViewEvents.RecoveryKeySavedToDownloads)
                             }
                         }
                     }
                     is BootstrapResult.InvalidPasswordError -> {
+                        initializeInProgress = false
                         // it's a bad password / auth
                         setState {
                             copy(
@@ -463,8 +525,9 @@ class BootstrapSharedViewModel @AssistedInject constructor(
                         if (bootstrapResult is BootstrapResult.GenericError &&
                                 bootstrapResult.failure is Failure.OtherServerError &&
                                 bootstrapResult.failure.httpCode == 401) {
-                            // Ignore this error
+                            // Ignore this error; UIA is still in progress
                         } else {
+                            initializeInProgress = false
                             _viewEvents.post(BootstrapViewEvents.ModalError(bootstrapResult.error ?: stringProvider.getString(CommonStrings.matrix_error)))
                             // Not sure
                             setState {

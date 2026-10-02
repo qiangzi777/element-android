@@ -22,6 +22,7 @@ import im.vector.app.core.di.MavericksAssistedViewModelFactory
 import im.vector.app.core.di.hiltMavericksViewModelFactory
 import im.vector.app.core.platform.VectorViewModel
 import im.vector.app.core.resources.StringProvider
+import im.vector.app.features.crypto.recover.LocalRecoveryKeyStore
 import im.vector.app.features.crypto.verification.SupportedVerificationMethodsProvider
 import im.vector.app.features.crypto.verification.VerificationAction
 import im.vector.app.features.crypto.verification.VerificationBottomSheetViewEvents
@@ -93,6 +94,7 @@ class SelfVerificationViewModel @AssistedInject constructor(
         private val rawService: RawService,
         private val stringProvider: StringProvider,
         private val matrix: Matrix,
+        private val localRecoveryKeyStore: LocalRecoveryKeyStore,
 ) :
         VectorViewModel<SelfVerificationViewState, VerificationAction, VerificationBottomSheetViewEvents>(initialState) {
 
@@ -164,6 +166,9 @@ class SelfVerificationViewModel @AssistedInject constructor(
                 copy(
                         isThisSessionVerified = isThisSessionVerified,
                 )
+            }
+            if (!isThisSessionVerified && session.sharedSecretStorageService().isRecoverySetup() && localRecoveryKeyStore.hasRecoveryKey()) {
+                handle(VerificationAction.VerifyFromPassphrase)
             }
         }
 //

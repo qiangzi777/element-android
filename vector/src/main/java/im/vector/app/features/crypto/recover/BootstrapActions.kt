@@ -33,6 +33,7 @@ sealed class BootstrapActions : VectorViewModelAction {
     object RecoveryKeySaved : BootstrapActions()
     object Completed : BootstrapActions()
     object SaveReqQueryStarted : BootstrapActions()
+    object SaveToDownloads : BootstrapActions()
     data class SaveKeyToUri(val os: OutputStream) : BootstrapActions()
     object SaveReqFailed : BootstrapActions()
 
